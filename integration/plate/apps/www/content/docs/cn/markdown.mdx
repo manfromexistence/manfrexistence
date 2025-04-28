@@ -1,0 +1,279 @@
+---
+title: Markdown 序列化
+toc: false
+---
+
+<ComponentPreview name="markdown-demo" />
+
+<PackageInfo>
+
+## 功能
+
+- 将 Markdown 字符串转换为 Slate JSON。
+- 将 Slate JSON 转换为 Markdown 字符串。
+- 支持自定义mdx节点
+- 支持往返序列化
+
+</PackageInfo>
+
+## 安装
+
+```bash
+npm install @udecode/plate-markdown
+```
+
+## 使用
+
+### Markdown 转 Slate
+
+```tsx
+import { MarkdownPlugin } from '@udecode/plate-markdown';
+
+const editor = createPlateEditor({ 
+  plugins: [
+    // ...其他插件,
+    MarkdownPlugin.configure({
+      options: {
+        remarkPlugins: [remarkMath, remarkGfm, remarkMdx],
+      },
+    }),
+  ],
+});
+
+const value = editor.api.markdown.deserialize('**Hello world!**');
+```
+
+<ComponentPreview name="markdown-to-slate-demo" />
+
+### Slate 转 Markdown
+
+
+```tsx
+const editor = createPlateEditor({ 
+  value,
+  plugins: [
+    // ...其他插件,
+    MarkdownPlugin.configure({
+      options: {
+        remarkPlugins: [remarkMath, remarkGfm, remarkMdx],
+      },
+    }),
+,
+  ],
+});
+
+const content = editor.api.markdown.serialize();
+```
+
+### 往返序列化
+
+在实现往返序列化时，关键是要处理那些在 Plate 编辑器中存在但在标准 Markdown 语法中不存在的自定义节点。这些节点（如 `date`、`mention` 等）需要被转换为 MDX 语法(类似 JSX)以保持数据的完整性。
+
+让我们通过一个日期选择器节点的示例来说明如何实现往返序列化：
+
+假设我们有以下 Slate 节点结构：
+```tsx
+{
+  type: 'p',
+  children: [{ type: 'text', text: '现在是' }, { type: 'date', date: '2025-03-31',children:[{type:'text',text:'2025-03-31'}] }],
+}
+```
+
+要实现完整的往返序列化，需要配置两个方向的转换规则：
+
+1. **序列化**（Slate → Markdown）：将 Slate 节点转换为 MDX 标签
+2. **反序列化**（Markdown → Slate）：将 MDX 标签解析回 Slate 节点
+
+以下是完整的配置示例：
+```tsx
+MarkdownPlugin.configure({
+  options: {
+    remarkPlugins: [remarkMath, remarkGfm, remarkMdx],
+    rules: {
+      date: {
+        deserialize(mdastNode: MdMdxJsxTextElement, deco, options) {
+          if (mdastNode.children?.[0] && 'value' in mdastNode.children[0]) {
+            return {
+              children: [{ text: '', type: 'text' }],
+              date: mdastNode.children[0].value,
+              type: 'date',
+            };
+          }
+
+          // Fallback
+          return {
+            children: [{ text: '', type: 'text' }],
+            date: '',
+            type: 'date',
+          };
+        },
+        serialize: (slateNode): MdMdxJsxTextElement => {
+          return {
+            attributes: [],
+            children: [{ type: 'text', value: slateNode.date || '1999-01-01' }],
+            name: 'date',
+            type: 'mdxJsxTextElement',
+          };
+        },
+      },
+    },
+  },
+});
+```
+
+使用上述配置后，内容将按以下方式转换：
+
+- Slate 节点 → Markdown：`将date slate节点转换为<date>2025-03-31</date>`
+- Markdown → Slate：将`<date>2025-03-31</date>`解析回原始的 Slate 节点结构
+
+
+## API
+
+### `MarkdownPlugin`
+
+<API name="MarkdownPlugin">
+<APIOptions>
+  <APIItem name="allowedNodes" type="NodesConfig | null">
+    配置允许的节点类型。不能与 disallowedNodes 同时使用。
+    如果指定了此选项，只有列表中的节点类型会被处理，其他类型会被过滤掉。
+    默认值：`null`
+  </APIItem>
+  <APIItem name="disallowedNodes" type="NodesConfig | null">
+    配置不允许的节点类型。不能与 allowedNodes 同时使用。
+    列表中的节点类型会被过滤掉，不会出现在最终结果中。
+    默认值：`null`
+  </APIItem>
+  <APIItem name="allowNode" type="AllowNodeConfig">
+    自定义节点过滤函数。在 allowedNodes/disallowedNodes 检查后调用。
+    - `deserialize`: 在解析 Markdown 时的自定义过滤函数
+    - `serialize`: 在转换为 Markdown 时的自定义过滤函数
+    返回 `true` 表示保留该节点，返回 `false` 表示过滤掉该节点。
+    这对于需要复杂逻辑来决定是否包含某个节点的场景很有用。
+    默认值：`null`
+  </APIItem>
+  <APIItem name="rules" type="TRules | null">
+    定义如何将 Markdown 语法元素转换为 Slate 编辑器元素的规则，或如何将 Slate 编辑器元素转换为 Markdown 语法元素的规则。包括段落、标题、列表、链接、图片等元素的转换规则。设置为 null 时将使用默认转换规则。
+    默认值：`null`
+  </APIItem>
+  <APIItem name="remarkPlugins" type="Plugin[]">
+    用于扩展 Markdown 解析和序列化功能的 remark 插件数组。例如，可以添加 remark-gfm 来支持 GFM 语法，remark-math 来支持数学公式等。这些插件将在解析和生成 Markdown 文本时使用。
+    默认值：`[]`
+  </APIItem>
+</APIOptions>
+</API>
+
+### `editor.api.markdown.deserialize`
+
+将 Markdown 字符串转换为 Slate 值。
+
+<API name="deserialize">
+<APIParameters>
+  <APIItem name="markdown" type="string">
+    要反序列化的 Markdown 字符串。
+  </APIItem>
+  <APIItem name="options" type="DeserializeMdOptions" optional>
+    反序列化过程的选项。
+  </APIItem>
+</APIParameters>
+
+<APIOptions type="DeserializeMdOptions">
+  <APIItem name="allowedNodes" type="NodesConfig" optional>
+    配置允许的节点类型。不能与 disallowedNodes 同时使用。
+  </APIItem>
+  <APIItem name="disallowedNodes" type="NodesConfig" optional>
+    配置不允许的节点类型。不能与 allowedNodes 同时使用。
+  </APIItem>
+  <APIItem name="allowNode" type="AllowNodeConfig" optional>
+    自定义节点过滤函数。在 allowedNodes/disallowedNodes 检查后调用。
+  </APIItem>
+  <APIItem name="memoize" type="boolean" optional>
+    启用带有 `_memo` 属性的块级记忆化，使其与 `PlateStatic` 记忆化兼容。
+    当启用时，会为每个解析的块添加原始 Markdown 内容作为 _memo 属性。
+  </APIItem>
+  <APIItem name="rules" type="TRules" optional>
+    定义如何将 Markdown 语法元素转换为 Slate 编辑器元素的规则。
+  </APIItem>
+  <APIItem name="parser" type="ParseMarkdownBlocksOptions" optional>
+    标记解析器的选项。可以过滤掉特定的 Markdown 标记类型（例如 'space'）。
+  </APIItem>
+  <APIItem name="remarkPlugins" type="Plugin[]" optional>
+    用于扩展 Markdown 解析功能的 remark 插件数组。
+  </APIItem>
+  <APIItem name="splitLineBreaks" type="boolean" optional>
+    当文本包含 \n 时，将文本拆分为单独的段落。
+  </APIItem>
+</APIOptions>
+    
+<APIReturns type="Descendant[]">
+    表示反序列化 Markdown 内容的 Slate 节点数组。
+</APIReturns>
+</API>
+
+### `editor.api.markdown.serialize`
+
+将当前的 Slate 值转换为 Markdown 字符串。
+
+<API name="serialize">
+<APIParameters>
+  <APIItem name="options" type="SerializeMdOptions" optional>
+    序列化过程的选项。
+  </APIItem>
+</APIParameters>
+
+<APIOptions type="SerializeMdOptions">
+  <APIItem name="allowedNodes" type="NodesConfig" optional>
+    配置允许的节点类型。不能与 disallowedNodes 同时使用。
+  </APIItem>
+  <APIItem name="disallowedNodes" type="NodesConfig" optional>
+    配置不允许的节点类型。不能与 allowedNodes 同时使用。
+  </APIItem>
+  <APIItem name="allowNode" type="AllowNodeConfig" optional>
+    自定义节点过滤函数。在 allowedNodes/disallowedNodes 检查后调用。
+  </APIItem>
+  <APIItem name="rules" type="TRules" optional>
+    定义如何将 Slate 编辑器元素转换为 Markdown 语法元素的规则。
+    **注意：** 当自定义内联节点时，不要忘记传递 `mark:true`。
+  </APIItem>
+  <APIItem name="remarkPlugins" type="Plugin[]" optional>
+    用于扩展 Markdown 序列化功能的 remark 插件数组。
+    这些插件会被传递给 unified 处理器，并与 remark-stringify 一起使用。
+  </APIItem>
+  <APIItem name="value" type="Descendant[]" optional>
+    要序列化的 Slate 节点。如果未提供，将使用整个编辑器值。
+  </APIItem>
+</APIOptions>
+
+<APIReturns type="string">
+  表示序列化 Slate 内容的 Markdown 字符串。
+  注意：序列化过程会自动将 `<br>` 标签转换为 `<br />` 以确保 MDX 兼容性。
+</APIReturns>
+</API>
+
+### `parseMarkdownBlocks`
+
+使用 marked lexer 提取和过滤 Markdown 标记。
+
+<API name="parseMarkdownBlocks">
+<APIParameters>
+  <APIItem name="markdown" type="string">
+    要解析为标记的 Markdown 字符串。
+  </APIItem>
+  <APIItem name="options" type="ParseMarkdownBlocksOptions" optional>
+    解析 Markdown 字符串的选项。
+  </APIItem>
+</APIParameters>
+
+<APIOptions type="ParseMarkdownBlocksOptions">
+  <APIItem name="exclude" type="string[]" optional>
+    要排除的标记类型数组（例如 ['space', 'hr']）。
+  </APIItem>
+  <APIItem name="trim" type="boolean" optional>
+    是否修剪内容的末尾。
+    - **默认值：** `true`
+  </APIItem>
+</APIOptions>
+
+<APIReturns type="Token[]">
+  Markdown 标记的数组。
+</APIReturns>
+</API>
